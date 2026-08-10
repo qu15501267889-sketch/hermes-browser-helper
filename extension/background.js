@@ -69,6 +69,7 @@ function trimData(raw) {
     xiaoheiheApi: raw.xiaoheiheApi || null,
     scrollInfo: raw.scrollInfo || null,
     scrollTrace: raw.scrollTrace || null,
+    screenshotPath: raw.screenshotPath || null,  // 截图文件路径（深度捕获时附带）
     apiRecords: (raw.apiRecords || []).slice(-30).map(r => {
       const u = r.url || '';
       const isDataApi = u.includes('/statQuery') || u.includes('/material') || u.includes('roi2_material') || u.includes('link/tree');
@@ -107,7 +108,39 @@ async function captureTab(tabId, isDeep = false) {
     const raw = await chrome.tabs.sendMessage(tabId, { action });
     if (!raw || !raw.title) return;
 
+    // 轻量心跳（内容无变化）：不覆盖历史，跳过发送
+    if (raw.unchanged) {
+      console.log('[Hermes] 内容无变化，跳过:', raw.url?.slice(0, 40));
+      return;
+    }
+
     const data = trimData(raw);
+
+    // 截图（深度捕获时自动附带）：POST 到 server /api/screenshot，单独存 PNG 文件，
+    // 避免 dataURL 撑爆 latest_page.json；pageData 只留路径标记供 agent 读取
+    if (isDeep) {
+      try {
+        const screenshot = await chrome.tabs.captureVisibleTab(tabId, { format: 'png', quality: 70 });
+        const config2 = await getConfig();
+        const shotResp = await fetch(`${config2.serverUrl}/api/screenshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageDataUrl: screenshot,
+            title: data.title,
+            url: data.url,
+            site: data.site,
+            timestamp: data.timestamp,
+          }),
+        });
+        // server 返回实际保存路径（如 ~/Downloads/hermes-browser-page/screenshot.png）
+        const shotJson = await shotResp.json().catch(() => ({}));
+        data.screenshotPath = shotJson.path || '';
+      } catch (e) {
+        console.log('[Hermes] 截图失败:', e.message?.slice(0, 60));
+      }
+    }
+
     await sendToServer(data);
     await saveToStorage(data);
   } catch (e) {
@@ -150,6 +183,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'triggerCapture') {
     // 手动触发：深度捕获（滚动+延迟+API）
     captureTab(request.tabId || sender.tab?.id, !!request.deep);
+    sendResponse({ ok: true });
+  }
+  if (request.action === 'spaRouteChanged') {
+    // SPA 路由变化（pushState/replaceState/popstate）：延迟等新路由渲染后重新捕获
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      const isTieba = (request.url || '').includes('tieba.baidu.com/p/');
+      setTimeout(() => captureTab(tabId, isTieba), isTieba ? 2500 : 800);  // captureTab 内部检查 autoCapture
+    }
     sendResponse({ ok: true });
   }
   return true;

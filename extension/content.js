@@ -594,6 +594,20 @@ function startLoadMoreClicker(maxMs = 15000) {
 
 // ========== 5. 主捕获函数 ==========
 
+// 验证码/风控页检测：命中时标记 captcha，不采集正文（agent 端改走 computer_use 读已渲染页面）
+const CAPTCHA_KEYWORDS = ['安全验证', '请输入验证码', '拖动滑块', '请完成验证', '尝试太多了', '人机验证', 'captcha', 'verify', '滑动验证'];
+function detectCaptchaPage() {
+  try {
+    const text = (document.body?.textContent || '').slice(0, 20000);
+    const hasCaptchaText = CAPTCHA_KEYWORDS.some(k => text.includes(k));
+    if (!hasCaptchaText) return false;
+    // 验证码关键词可能出现在正文里，需要辅助证据：验证码 iframe / 验证码元素 / 页面极短（纯验证码页）
+    const hasCaptchaFrame = !!document.querySelector('iframe[src*="captcha"], iframe[src*="gtimg"], iframe[src*="geetest"], iframe[src*="verify"], iframe[src*="turing"]');
+    const hasCaptchaEl = !!document.querySelector('[class*="captcha"], [class*="verify"], #captcha, [id*="captcha"], [class*="slider"]');
+    return hasCaptchaFrame || hasCaptchaEl || text.length < 2000;
+  } catch (e) { return false; }
+}
+
 async function capturePage() {
   // 注入 API 拦截器（document_start 时已尝试，这里再确保）
   injectInterceptor();
@@ -604,30 +618,48 @@ async function capturePage() {
   }
   await new Promise(r => setTimeout(r, 500));
 
+  // 验证码/风控页：不采集正文，标记 captcha 供 agent 判断
+  if (detectCaptchaPage()) {
+    return {
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      title: document.title,
+      pageType: 'captcha',
+      site: detectSite(),
+      mainText: '',
+      captcha: true,
+    };
+  }
+
   // 滚动触发懒加载（分屏收集，对抗虚拟滚动）
   // 按站点选择采集策略：贴吧先探测移动版 API（免滚动拿完整楼层），失败再滚动兜底
   const siteName = detectSite();
   let tiebaApi = null;
+  let tiebaApiOk = false;
   let xiaoheiheApi = null;
   if (siteName === 'tieba') {
     const tid = getTiebaTid();
     if (tid) {
       tiebaApi = await probeTiebaApi(tid);
       // 若 API 有效则跳过滚动（完整楼层由 API 翻页拉取，见 tiebaApi）
-      const apiOk = (tiebaApi || []).some(r => r.hasFloor && !r.error);
-      if (!apiOk) startLoadMoreClicker();
+      tiebaApiOk = (tiebaApi || []).some(r => r.hasFloor && !r.error);
+      if (!tiebaApiOk) startLoadMoreClicker();
     }
   }
   if (siteName === 'xiaoheihe') {
     xiaoheiheApi = await fetchXiaoheiheComments();
   }
-  // TODO(滚动方案已验证可拿全部楼层，暂时注释以加速免滚动方案测试；恢复时把下面两行取消注释)
-  // const collected = (siteName === 'tieba')
-  //   ? await silentScrollCollect(60)
-  //   : await collectScrolledText(30);
-  const collected = (siteName === 'tieba')
-    ? { text: extractFullText(), scrollInfo: null, scrollTrace: null, floors: extractTiebaFloors() }
-    : await collectScrolledText(30);
+  // 采集策略：贴吧 API 探测成功 → 免滚动快速提取（完整楼层由 agent 端 tieba_fetch.py 拉 API）；
+  //          贴吧 API 失败 → 降级静默滚动（对抗虚拟滚动，拿已渲染楼层）；
+  //          其他站点 → 通用滚动分屏收集
+  let collected;
+  if (siteName === 'tieba' && tiebaApiOk) {
+    collected = { text: extractFullText(), scrollInfo: null, scrollTrace: null, floors: extractTiebaFloors() };
+  } else if (siteName === 'tieba') {
+    collected = await silentScrollCollect(60);
+  } else {
+    collected = await collectScrolledText(30);
+  }
   const collectedText = collected.text;
   const scrollInfo = collected.scrollInfo || null;
   const scrollTrace = collected.scrollTrace || null;
@@ -679,16 +711,57 @@ function detectSite() {
   return 'generic';
 }
 
+// ===== 内容去重：同 URL 正文无变化时发轻量心跳（省带宽、不污染历史） =====
+let lastContentHash = null;  // 当前标签页上次捕获的正文 hash
+
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  }
+  return String(h >>> 0);
+}
+
 // 快速捕获（用于自动背景捕获）
 async function captureQuick() {
   injectInterceptor();
+
+  // 验证码/风控页：快速捕获同样跳过正文
+  if (detectCaptchaPage()) {
+    return {
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      title: document.title,
+      pageType: 'captcha',
+      site: detectSite(),
+      mainText: '',
+      captcha: true,
+    };
+  }
+
+  // 内容去重：同一 URL 的 mainText 无变化 → 轻量心跳（background 不覆盖历史）
+  const quickText = extractFullText();
+  const hash = simpleHash(quickText.slice(0, 50000));
+  if (lastContentHash !== null && lastContentHash === hash) {
+    return {
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      title: document.title,
+      pageType: detectPageType(),
+      site: detectSite(),
+      unchanged: true,
+      contentHash: hash,
+    };
+  }
+  lastContentHash = hash;
+
   const pageData = {
     timestamp: new Date().toISOString(),
     url: window.location.href,
     title: document.title,
     pageType: detectPageType(),
     site: detectSite(),
-    mainText: extractFullText(),
+    mainText: quickText,
     layout: extractLayout(),
     siteSpecific: extractSiteSpecific(),
     tables: extractHtmlTables(),
@@ -756,3 +829,38 @@ function isTiebaThreadPage() {
   const u = window.location.href;
   return u.includes('tieba.baidu.com/p/');
 }
+
+// ========== 8. SPA 路由切换检测（任务5：pushState/replaceState/popstate 触发重捕获） ==========
+// SPA 站（贴吧只看楼主、千川切 tab 等）URL 变化不触发 tabs.onUpdated，
+// 这里 hook history API，URL 变化后通知 background 重新捕获
+(function hookSpaRouting() {
+  let lastUrl = window.location.href;
+
+  function notifyUrlChanged() {
+    const url = window.location.href;
+    if (url === lastUrl) return;
+    lastUrl = url;
+    try {
+      chrome.runtime.sendMessage({ action: 'spaRouteChanged', url: url });
+    } catch (e) {}
+  }
+
+  try {
+    // hook pushState / replaceState（SPA 内部跳转主要走这里）
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    history.pushState = function() {
+      const ret = origPush.apply(this, arguments);
+      setTimeout(notifyUrlChanged, 0);
+      return ret;
+    };
+    history.replaceState = function() {
+      const ret = origReplace.apply(this, arguments);
+      setTimeout(notifyUrlChanged, 0);
+      return ret;
+    };
+    // 浏览器前进/后退（popstate）与 hash 变化
+    window.addEventListener('popstate', notifyUrlChanged);
+    window.addEventListener('hashchange', notifyUrlChanged);
+  } catch (e) {}
+})();

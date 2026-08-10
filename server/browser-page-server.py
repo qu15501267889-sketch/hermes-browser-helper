@@ -10,6 +10,7 @@ import http.server
 import json
 import sys
 import time
+import os
 from urllib.parse import urlparse
 
 # 存储最新页面数据
@@ -89,8 +90,7 @@ class PageHandler(http.server.BaseHTTPRequestHandler):
                     "count": latest_page["count"] + 1,
                 }
                 # 保存到本地文件（供 Hermes 直接读取）
-                save_path = "C:\\Users\\user\\Downloads\\hermes-browser-page\\latest_page.json"
-                import os
+                save_path = os.path.join(os.path.expanduser("~"), "Downloads", "hermes-browser-page", "latest_page.json")
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 with open(save_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
@@ -123,8 +123,8 @@ class PageHandler(http.server.BaseHTTPRequestHandler):
                     "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
                 # 保存截图文件
-                save_path = "C:\\Users\\user\\Downloads\\hermes-browser-page\\screenshot.png"
-                import os, base64
+                save_path = os.path.join(os.path.expanduser("~"), "Downloads", "hermes-browser-page", "screenshot.png")
+                import base64
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 # 从 data URL 提取 base64 数据
                 image_b64 = data.get("imageDataUrl", "")
@@ -132,7 +132,7 @@ class PageHandler(http.server.BaseHTTPRequestHandler):
                     image_data = base64.b64decode(image_b64.split(",")[1])
                     with open(save_path, "wb") as f:
                         f.write(image_data)
-                self._send_json({"status": "ok"})
+                self._send_json({"status": "ok", "path": save_path})
             except Exception as e:
                 self._send_json({"status": "error", "message": str(e)}, 400)
         else:

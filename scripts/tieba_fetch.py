@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 tieba_fetch.py — 贴吧帖子完整楼层拉取（免滚动、免浏览器）
-原理：贴吧官方 JSON 接口 c/f/pb/page，签名 key 为 'tiebaclient!!!'（2026 年仍有效）
+原理：贴吧官方 JSON 接口 c/f/pb/page，签名 key 为 'tiebaclient!!!'（2026-08 仍有效）
 用法：
   python tieba_fetch.py <帖子ID或URL> [--see-lz] [--out out.json]
 示例：
@@ -12,13 +12,11 @@ tieba_fetch.py — 贴吧帖子完整楼层拉取（免滚动、免浏览器）
   pip install curl_cffi  或  uv run --with curl_cffi python tieba_fetch.py ...
 """
 
-import sys
 import re
 import json
 import time
 import hashlib
 import argparse
-from urllib.parse import urlparse, parse_qs
 
 try:
     from curl_cffi import requests as curl_requests
@@ -59,18 +57,25 @@ def extract_tid(arg: str) -> str:
     raise ValueError(f"无法识别帖子ID: {arg}")
 
 
-def parse_post(p: dict) -> dict:
+def parse_post(p: dict, user_map: dict = None) -> dict:
     """楼层 JSON -> 结构化 dict"""
     # content 是 [{text, type}] 数组，拼接文本
     content = ""
     for c in p.get("content") or []:
         if isinstance(c, dict):
             content += c.get("text", "")
-    # 作者
-    author = (p.get("author_name") or p.get("name") or p.get("author") or "").strip()
+    # 作者：post_list 无 author_name，作者名在响应顶层 user_list（按 author_id 映射）
+    author = ""
+    uid = p.get("author_id")
+    if user_map and uid is not None and uid in user_map:
+        author = user_map[uid] or ""
+    if not author:
+        author = (p.get("author_name") or p.get("name") or "").strip()
     return {
         "floor": p.get("floor"),
         "author": author or None,
+        "author_id": uid,
+        "pid": p.get("id"),          # 楼中楼接口 c/f/pb/floor 需要 pid（=post_list[].id）
         "time": p.get("time"),
         "agree": p.get("agree"),
         "sub_post_number": p.get("sub_post_number", 0),
@@ -96,15 +101,21 @@ def fetch_all(tid: str, see_lz: bool = False, max_pages: int = 500, delay: float
     all_floors = []
     page_info = {}
     seen_floors = set()
+    user_map = {}                    # author_id -> 作者名（来自响应顶层 user_list）
 
     for pn in range(1, max_pages + 1):
         j = fetch_page(tid, pn, see_lz, session)
         page_info = j.get("page") or {}
+        # 作者名映射：user_list 每项 {id, name/name_show}
+        for u in j.get("user_list") or []:
+            uid = u.get("id")
+            if uid is not None and uid not in user_map:
+                user_map[uid] = u.get("name") or u.get("name_show") or ""
         posts = j.get("post_list") or []
         if not posts:
             break
         for p in posts:
-            parsed = parse_post(p)
+            parsed = parse_post(p, user_map)
             # 按楼号去重（广告楼等可能重复）
             if parsed["floor"] and parsed["floor"] not in seen_floors:
                 seen_floors.add(parsed["floor"])

@@ -4,6 +4,15 @@
 
 支持 **Edge / Chrome**。已适配 **百度贴吧、小黑盒、巨量千川**，并提供通用扩展机制（详见 [docs/SITE_ADAPTERS.md](docs/SITE_ADAPTERS.md)）。
 
+**当前版本：V2.0.0**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V2.0 新特性
+
+- **验证码页识别**：检测「安全验证/验证码」墙（如小黑盒 turing 验证码）→ 标记 `pageType:'captcha'`，不再把验证码壳当正文
+- **SPA 路由自动捕获**：hook `history.pushState/replaceState/popstate`，贴吧「只看楼主」、千川切 tab 等内部跳转自动触发重捕获
+- **内容去重心跳**：同 URL 正文无变化时发轻量心跳，不重复污染历史
+- **深度捕获自动截图**：页面截图存本地 PNG，pageData 带 `screenshotPath`，供 agent 视觉分析
+
 ---
 
 ## 架构
