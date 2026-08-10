@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地产物（数据文件，不提交）
+latest_page.json
+*.json.tmp
+tieba_imgs_*.json
+
+# 备份
+*.bak
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/

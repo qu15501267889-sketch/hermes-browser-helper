@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Hermes 网页助手",
+  "version": "1.0.0",
+  "description": "自动捕获网页内容（文字、图片链接、DOM布局），保存到本地供 Hermes AI 读取分析。支持小黑盒、贴吧、B站、知乎等。",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hermes 网页助手"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["injector.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      color: #1a1a2e;
+      background: #f8f9fa;
+    }
+    .container { padding: 16px; }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-weight: bold; font-size: 18px;
+    }
+    .title {
+      font-weight: 600; font-size: 15px;
+    }
+    .subtitle {
+      color: #888; font-size: 11px;
+    }
+    .status-card {
+      background: white;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .status-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 0;
+    }
+    .label { color: #666; }
+    .value { font-weight: 500; }
+    .badge {
+      background: #e8f5e9; color: #2e7d32;
+      padding: 2px 8px; border-radius: 10px; font-size: 11px;
+    }
+    .badge.off { background: #fce4ec; color: #c62828; }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: #e8eaed;
+      color: #333;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover { background: #d4d6da; }
+    .btn-danger {
+      background: #fce4ec;
+      color: #c62828;
+      margin-top: 8px;
+    }
+    .btn-danger:hover { background: #f8bbd0; }
+    .page-info {
+      background: white;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      word-break: break-all;
+    }
+    .page-info .url { font-size: 11px; color: #888; margin-top: 4px; }
+    .page-info .type { font-size: 11px; color: #667eea; margin-top: 4px; }
+    .toast {
+      position: fixed; bottom: 16px; left: 16px; right: 16px;
+      padding: 10px; border-radius: 8px;
+      text-align: center; font-size: 12px;
+      transition: opacity 0.3s;
+      opacity: 0; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .toast.success { background: #e8f5e9; color: #2e7d32; }
+    .toast.error { background: #fce4ec; color: #c62828; }
+    .footer { text-align: center; font-size: 10px; color: #aaa; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">H</div>
+      <div>
+        <div class="title">Hermes 网页助手</div>
+        <div class="subtitle">自动捕获中 · 随时对话</div>
+      </div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-row" id="toggleRow" style="cursor:pointer;">
+        <span class="label">自动捕获</span>
+        <span class="badge" id="autoStatus">开启</span>
+      </div>
+      <div class="status-row">
+        <span class="label">当前页面</span>
+        <span class="value" id="hasPage">—</span>
+      </div>
+    </div>
+
+    <div class="page-info" id="pageInfo">
+      <div id="pageTitle" style="font-weight:500;">等待浏览器页面…</div>
+      <div class="url" id="pageUrl"></div>
+      <div class="type" id="pageType"></div>
+    </div>
+
+    <button class="btn btn-primary" id="captureNowBtn">⚡ 深度捕获当前页</button>
+    <button class="btn btn-secondary" id="screenshotBtn">⚡ 快速捕获</button>
+
+    <div class="footer">
+      Hermes 桌面版与你对话即可了解页面内容
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

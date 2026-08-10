@@ -1,0 +1,32 @@
+{
+  "name": "百度贴吧",
+  "base_url": "https://tieba.baidu.com/c/f/pb/page",
+  "impersonate": "chrome124",
+  "params": {
+    "kz": "{id}",
+    "rdt": "1",
+    "see_lz": "0",
+    "_client_type": "2",
+    "_client_version": "12.51.0.0",
+    "_client_id": "wapp_{ts_ms}",
+    "_t": "{ts}"
+  },
+  "sign": {
+    "key": "tiebaclient!!!",
+    "style": "md5_concat"
+  },
+  "pagination": {
+    "param": "pn",
+    "start": 1,
+    "has_more": "page.has_more",
+    "total_pages": "page.total_page"
+  },
+  "items": "post_list",
+  "fields": {
+    "floor": { "path": "floor" },
+    "author": { "path": "author_name" },
+    "time": { "path": "time" },
+    "agree": { "path": "agree" },
+    "content": { "path": "content", "join": "text" }
+  }
+}
