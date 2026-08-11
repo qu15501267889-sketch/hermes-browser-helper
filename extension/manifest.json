@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hermes 网页助手",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "自动捕获网页内容（文字、图片链接、DOM布局、页面截图），保存到本地供 Hermes AI 读取分析。支持小黑盒、贴吧、B站、知乎等。",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],

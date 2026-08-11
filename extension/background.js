@@ -5,7 +5,7 @@ const LOCAL_SERVER = 'http://127.0.0.1:8765';
 
 // 默认配置（可从 storage 覆盖）
 const DEFAULT_CONFIG = {
-  autoCapture: true,
+  autoCapture: false,       // V2.1: 默认手动模式（只有用户点 popup 按钮才捕获）；打开开关可恢复自动
   serverUrl: LOCAL_SERVER,
   captureDelay: 4000,      // 延迟 4 秒等 JS 渲染
   deepCapture: true,
@@ -88,9 +88,10 @@ function trimData(raw) {
 }
 
 // 捕获标签页
-async function captureTab(tabId, isDeep = false) {
+// force=true 表示手动触发（popup 按钮），绕过 autoCapture 开关；自动触发（onUpdated/onActivated/spaRouteChanged）受开关控制
+async function captureTab(tabId, isDeep = false, force = false) {
   const config = await getConfig();
-  if (!config.autoCapture) return;
+  if (!config.autoCapture && !force) return;
 
   // 跳过内部页
   try {
@@ -181,8 +182,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (request.action === 'triggerCapture') {
-    // 手动触发：深度捕获（滚动+延迟+API）
-    captureTab(request.tabId || sender.tab?.id, !!request.deep);
+    // 手动触发：深度/快速捕获（force=true 绕过 autoCapture 开关）
+    captureTab(request.tabId || sender.tab?.id, !!request.deep, true);
     sendResponse({ ok: true });
   }
   if (request.action === 'spaRouteChanged') {

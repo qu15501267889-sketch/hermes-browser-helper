@@ -30,7 +30,7 @@ function classifyUrl(url) {
 // 读取配置
 async function getConfig() {
   const stored = await chrome.storage.local.get(CONFIG_KEY);
-  return stored[CONFIG_KEY] || { autoCapture: true };
+  return stored[CONFIG_KEY] || { autoCapture: false };  // V2.1: 默认手动模式
 }
 
 // 保存配置

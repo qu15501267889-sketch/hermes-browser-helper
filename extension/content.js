@@ -632,31 +632,26 @@ async function capturePage() {
   }
 
   // 滚动触发懒加载（分屏收集，对抗虚拟滚动）
-  // 按站点选择采集策略：贴吧先探测移动版 API（免滚动拿完整楼层），失败再滚动兜底
+  // 按站点选择采集策略：贴吧一律免滚动（完整楼层由 agent 端 tieba_fetch.py 拉 API，插件不滚动避免打扰用户）
   const siteName = detectSite();
   let tiebaApi = null;
-  let tiebaApiOk = false;
   let xiaoheiheApi = null;
   if (siteName === 'tieba') {
     const tid = getTiebaTid();
     if (tid) {
+      // 探测移动版接口（仅记录结果供 agent 参考，不再决定是否滚动——贴吧 V2.1 起一律免滚动）
       tiebaApi = await probeTiebaApi(tid);
-      // 若 API 有效则跳过滚动（完整楼层由 API 翻页拉取，见 tiebaApi）
-      tiebaApiOk = (tiebaApi || []).some(r => r.hasFloor && !r.error);
-      if (!tiebaApiOk) startLoadMoreClicker();
+      startLoadMoreClicker();
     }
   }
   if (siteName === 'xiaoheihe') {
     xiaoheiheApi = await fetchXiaoheiheComments();
   }
-  // 采集策略：贴吧 API 探测成功 → 免滚动快速提取（完整楼层由 agent 端 tieba_fetch.py 拉 API）；
-  //          贴吧 API 失败 → 降级静默滚动（对抗虚拟滚动，拿已渲染楼层）；
+  // 采集策略：贴吧一律免滚动快速提取（完整楼层由 agent 端 tieba_fetch.py 拉 API）；
   //          其他站点 → 通用滚动分屏收集
   let collected;
-  if (siteName === 'tieba' && tiebaApiOk) {
+  if (siteName === 'tieba') {
     collected = { text: extractFullText(), scrollInfo: null, scrollTrace: null, floors: extractTiebaFloors() };
-  } else if (siteName === 'tieba') {
-    collected = await silentScrollCollect(60);
   } else {
     collected = await collectScrolledText(30);
   }

@@ -4,7 +4,13 @@
 
 支持 **Edge / Chrome**。已适配 **百度贴吧、小黑盒、巨量千川**，并提供通用扩展机制（详见 [docs/SITE_ADAPTERS.md](docs/SITE_ADAPTERS.md)）。
 
-**当前版本：V2.0.0**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+**当前版本：V2.1.0**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V2.1 变更
+
+- **默认手动模式**：自动捕获默认关闭，浏览页面零动作零滚动；需要时点 popup「快速捕获」（不滚动）或「深度捕获」，或手动打开「自动捕获」开关恢复自动
+- **贴吧彻底免滚动**：贴吧捕获一律快速提取（不再触发静默滚动），完整楼层由 agent 端 `tieba_fetch.py` 拉官方 API
+- **手动按钮绕过开关**：popup 手动按钮不再受「自动捕获」开关限制（修复隐藏 bug）
 
 ## V2.0 新特性
 
