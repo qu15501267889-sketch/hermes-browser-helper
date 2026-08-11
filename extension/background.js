@@ -66,6 +66,7 @@ function trimData(raw) {
     repeatedBlocks: (raw.repeatedBlocks || []).slice(0, 10),
     tiebaFloors: (raw.tiebaFloors || []).slice(0, 500),
     tiebaApi: raw.tiebaApi || null,
+    tiebaApiInfo: raw.tiebaApiInfo || null,  // 贴吧 API 拉取状态（快速捕获 V2.1.2）
     xiaoheiheApi: raw.xiaoheiheApi || null,
     scrollInfo: raw.scrollInfo || null,
     scrollTrace: raw.scrollTrace || null,
@@ -177,8 +178,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (request.action === 'saveCapture') {
-    sendToServer(request.data);
-    saveToStorage(request.data);
+    // 心跳数据（unchanged）不写入 server——防止空数据覆盖正常捕获结果
+    if (!request.data?.unchanged) {
+      sendToServer(request.data);
+      saveToStorage(request.data);
+    }
     sendResponse({ ok: true });
   }
   if (request.action === 'triggerCapture') {

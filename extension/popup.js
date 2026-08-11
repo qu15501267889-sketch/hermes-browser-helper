@@ -111,7 +111,7 @@ async function triggerDeepCapture() {
   }
 }
 
-// 快速捕获（不滚动）
+// 快速捕获（不滚动；force=true 绕过内容去重——用户手动点就是要拿一份完整的）
 async function quickCapture() {
   const btn = document.getElementById('screenshotBtn');
   btn.disabled = true;
@@ -123,7 +123,7 @@ async function quickCapture() {
       showToast('没有可捕获的页面', 'error');
       return;
     }
-    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'captureQuick' });
+    const resp = await chrome.tabs.sendMessage(tab.id, { action: 'captureQuick', force: true });
     if (resp && resp.title) {
       chrome.runtime.sendMessage({ action: 'saveCapture', data: resp });
       showToast('✅ 已捕获');

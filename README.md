@@ -2,9 +2,14 @@
 
 > 浏览器插件 + 本地服务 + 站点拉取脚本，把网页内容（正文、评论区、API 数据）结构化地喂给 Hermes AI 分析。
 
-支持 **Edge / Chrome**。已适配 **百度贴吧、小黑盒、巨量千川**，并提供通用扩展机制（详见 [docs/SITE_ADAPTERS.md](docs/SITE_ADAPTERS.md)）。
+支持 **Edge / Chrome**。**当前仅适配三个站点：百度贴吧、小黑盒、巨量千川**（其他网站不保证可用，详见[已适配站点](#已适配站点当前仅适配以下三个其他站点不保证)）。
 
-**当前版本：V2.1.0**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+**当前版本：V2.1.1**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V2.1.1 变更
+
+- **快速捕获直拉贴吧全量楼层**：贴吧页面点「快速捕获」即调用官方 API（`c/f/pb/page` + 签名）拉取全部楼层，不再只有视口内容（实测 690 楼帖子一次拿 683 楼）
+- **修复手动快速捕获被内容去重吞掉**：popup「快速捕获」走 `force=true` 绕过去重；`saveCapture` 不再写入心跳空数据
 
 ## V2.1 变更
 
@@ -94,14 +99,16 @@ uv run --with curl_cffi python scripts/tieba_imgs.py <帖子ID>
 python scripts/site_fetch.py --list
 ```
 
-## 已适配站点
+## 已适配站点（当前仅适配以下三个，其他站点不保证）
+
+> **说明**：本项目**只适配百度贴吧、小黑盒、巨量千川**三个站点。其他网站（B站、知乎、微博等）虽然插件有通用 fetch/XHR 拦截 + DOM 提取，但**未经适配、不保证能用**——它们不在支持范围内。
 
 | 站点 | 插件（浏览器内） | 脚本（服务器端） | 数据源 |
 |---|---|---|---|
-| 百度贴吧 | 楼层 DOM 解析 | ✅ `site_fetch.py tieba`（官方接口+签名，匿名可调） | `c/f/pb/page` API |
-| 小黑盒 | ✅ 评论 API（借浏览器 cookie 过风控） | 需 cookie，暂服务器端不可用 | `link/tree` 拦截 |
-| 巨量千川 | ✅ 数据接口（statQuery 等） | — | API 拦截 |
-| 其他网站 | ✅ 通用拦截（fetch/XHR + DOM 提取） | 配置即用 | 见教程 |
+| **百度贴吧** | ✅ 官方 API 直拉全量楼层（`c/f/pb/page` + 签名，快速捕获即全量） | ✅ `site_fetch.py tieba`（官方接口+签名，匿名可调） | `c/f/pb/page` API |
+| **小黑盒** | ✅ 评论 API（借浏览器 cookie 过风控） | 需 cookie，暂服务器端不可用 | `link/tree` 拦截 |
+| **巨量千川** | ✅ 数据接口（statQuery 等） | — | API 拦截 |
+| 其他网站 | ⚠️ 仅通用拦截兜底，**不保证可用** | — | 见教程 |
 
 ## 通用性设计
 
