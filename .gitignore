@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Hermes 插件本地配置（含自动生成的 token，不要上传）
+hermes-plugin/config.json
+
+# Hermes 插件抓取数据（隐私内容）
+hermes-plugin/state/
+
 # 本地产物（数据文件，不提交）
 latest_page.json
 *.json.tmp

@@ -1,0 +1,8 @@
+name: browser-bridge
+version: 3.1.1
+description: "浏览器内容桥接：接收浏览器扩展推送的页面快照（贴吧/小黑盒），提供 page_status / page_content / page_refresh 工具供模型读取当前页面完整内容。"
+author: "qu15501267889-sketch"
+provides_tools:
+  - page_status
+  - page_content
+  - page_refresh

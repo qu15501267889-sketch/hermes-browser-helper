@@ -1,0 +1,232 @@
+"""browser-bridge server — 本地 HTTP 接收端。
+
+浏览器扩展把页面快照 POST 到 http://127.0.0.1:PORT/api/page，
+本模块校验 token 后存入内存 + 磁盘，供 tools.py 读取。
+
+配置：优先读 config.json（token 首次运行自动生成随机值），
+可环境变量覆盖 BRIDGE_HOST / BRIDGE_PORT / BRIDGE_TOKEN。
+零第三方依赖（纯标准库）。
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import secrets
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 配置
+# ---------------------------------------------------------------------------
+
+CONFIG_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = CONFIG_DIR / "config.json"
+STATE_DIR = CONFIG_DIR / "state"
+STATE_FILE = STATE_DIR / "latest_page.json"
+
+_DEFAULTS = {
+    "host": "127.0.0.1",
+    "port": 4399,
+    "token": "",  # 空 = 自动生成随机 token 并保存
+}
+
+
+def load_config() -> dict:
+    """加载配置；token 为空时自动生成随机值并持久化。"""
+    cfg = dict(_DEFAULTS)
+    try:
+        if CONFIG_FILE.exists():
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                cfg.update({k: data[k] for k in _DEFAULTS if k in data})
+    except Exception as exc:
+        logger.warning("browser-bridge: 读取 config.json 失败: %s", exc)
+
+    if not cfg.get("token"):
+        cfg["token"] = secrets.token_hex(16)
+        try:
+            CONFIG_FILE.write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as exc:
+            logger.warning("browser-bridge: 保存 config.json 失败: %s", exc)
+
+    # 环境变量覆盖
+    cfg["host"] = os.environ.get("BRIDGE_HOST", cfg["host"])
+    cfg["port"] = int(os.environ.get("BRIDGE_PORT", cfg["port"]))
+    cfg["token"] = os.environ.get("BRIDGE_TOKEN", cfg["token"])
+    return cfg
+
+
+CONFIG = load_config()
+HOST = CONFIG["host"]
+PORT = CONFIG["port"]
+TOKEN = CONFIG["token"]
+
+# 内存中的当前页面状态（单页，新推送覆盖旧的）
+_state: dict = {}
+_state_lock = threading.Lock()
+_server: ThreadingHTTPServer | None = None
+
+
+# ---------------------------------------------------------------------------
+# 状态读写
+# ---------------------------------------------------------------------------
+
+def get_state() -> dict:
+    """返回当前页面快照的深拷贝（空 dict 表示还没有推送）。"""
+    with _state_lock:
+        return json.loads(json.dumps(_state))
+
+
+def set_state(page: dict) -> None:
+    """存入新快照：内存 + 磁盘持久化。"""
+    with _state_lock:
+        _state.clear()
+        _state.update(page)
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(
+            json.dumps(page, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:  # 磁盘失败不阻塞接收
+        logger.warning("browser-bridge: 状态落盘失败: %s", exc)
+
+
+def load_state_from_disk() -> None:
+    """启动时尝试恢复上次的页面快照。"""
+    global _state
+    try:
+        if STATE_FILE.exists():
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data:
+                with _state_lock:
+                    _state = data
+    except Exception as exc:
+        logger.warning("browser-bridge: 恢复状态失败: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# HTTP handler
+# ---------------------------------------------------------------------------
+
+class _BridgeHandler(BaseHTTPRequestHandler):
+    """处理扩展的推送请求。
+
+    端点：
+      GET  /health     → 存活检查（扩展用它探测 server 是否在跑）
+      POST /api/page   → 接收页面快照（需 X-Bridge-Token 头）
+    """
+
+    def log_message(self, fmt, *args):  # 静默，避免刷日志
+        pass
+
+    def _send_json(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        # 允许浏览器扩展页面跨域调用（MV3 扩展 fetch 本地端口）
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Bridge-Token")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self):  # noqa: N802
+        self._send_json(200, {"ok": True})
+
+    def _check_token(self) -> bool:
+        token = self.headers.get("X-Bridge-Token", "")
+        return token == TOKEN
+
+    def do_GET(self):  # noqa: N802
+        if self.path == "/health":
+            self._send_json(200, {"ok": True, "service": "browser-bridge"})
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def do_POST(self):  # noqa: N802
+        if self.path != "/api/page":
+            self._send_json(404, {"error": "not found"})
+            return
+        if not self._check_token():
+            self._send_json(403, {"error": "bad token"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length > 0 else b""
+            page = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            self._send_json(400, {"error": f"bad payload: {exc}"})
+            return
+        if not isinstance(page, dict) or not page.get("url"):
+            self._send_json(400, {"error": "payload must be a dict with 'url'"})
+            return
+        page.setdefault("received_at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        # 贴吧帖子：自动匿名 API 全量拉取楼层（免滚动）
+        if "tieba.baidu.com" in page.get("url", "") and "/p/" in page.get("url", ""):
+            try:
+                import importlib
+                tf = importlib.import_module("tieba_fetch")
+            except Exception:
+                tf = None
+            tid = tf.extract_tid(page["url"]) if tf else None
+            if tid:
+                try:
+                    result = tf.fetch_thread(tid)
+                    if result.get("success"):
+                        page["title"] = result.get("title") or page.get("title", "")
+                        page["content"] = result.get("floors") or []
+                        page["fetch_mode"] = "tieba_api"
+                        page["fetch_meta"] = {
+                            "tid": tid,
+                            "reply_count": result.get("reply_count"),
+                            "total_pages": result.get("total_pages"),
+                            "floors": len(result.get("floors") or []),
+                        }
+                except Exception as exc:
+                    page.setdefault("fetch_meta", {})["error"] = f"{type(exc).__name__}: {exc}"
+        set_state(page)
+        self._send_json(200, {"ok": True, "url": page["url"], "blocks": len(page.get("content") or [])})
+
+
+# ---------------------------------------------------------------------------
+# 生命周期
+# ---------------------------------------------------------------------------
+
+def start_server() -> bool:
+    """启动本地 HTTP server（线程内，daemon）。返回是否成功。"""
+    global _server
+    if _server is not None:
+        return True
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), _BridgeHandler)
+        server.daemon_threads = True
+        _server = server
+        t = threading.Thread(target=server.serve_forever, daemon=True, name="browser-bridge-http")
+        t.start()
+        logger.info("browser-bridge: 本地服务已启动 http://%s:%d", HOST, PORT)
+        return True
+    except Exception as exc:
+        logger.warning("browser-bridge: 启动失败（端口被占用?）: %s", exc)
+        return False
+
+
+def stop_server() -> None:
+    """停止本地 HTTP server（插件卸载/会话结束时调用）。"""
+    global _server
+    if _server is not None:
+        try:
+            _server.shutdown()
+            _server.server_close()
+        except Exception:
+            pass
+        _server = None
+
+

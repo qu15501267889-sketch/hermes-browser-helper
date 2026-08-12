@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 260px; font-family: "Microsoft YaHei", sans-serif; margin: 0; padding: 12px; }
+    h1 { font-size: 14px; margin: 0 0 8px; color: #333; }
+    #status { font-size: 12px; color: #666; margin-bottom: 10px; min-height: 32px; }
+    #btn { width: 100%; padding: 8px; background: #4a6cf7; color: #fff;
+           border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+    #btn:disabled { background: #aaa; cursor: not-allowed; }
+    #btn:hover:not(:disabled) { background: #3a5cd7; }
+    #detail { margin-top: 8px; font-size: 11px; color: #888; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>🧩 browser-bridge</h1>
+  <div id="status">点击「拉取」抓取当前页面，推送给 Hermes。</div>
+  <button id="btn" type="button">📥 拉取当前页面</button>
+  <div id="detail"></div>
+  <details id="settings" style="margin-top:10px;font-size:12px;">
+    <summary style="cursor:pointer;color:#4a6cf7;">⚙️ 连接设置</summary>
+    <div style="margin-top:6px;">
+      <label>服务器地址<br><input id="cfgHost" type="text" style="width:100%;box-sizing:border-box;padding:4px;"></label>
+      <label style="display:block;margin-top:6px;">Token（可选）<br><input id="cfgToken" type="text" style="width:100%;box-sizing:border-box;padding:4px;"></label>
+      <button id="btnSave" type="button" style="margin-top:6px;width:100%;padding:5px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;">保存</button>
+      <div id="cfgMsg" style="margin-top:4px;color:#2e7d32;"></div>
+    </div>
+  </details>
+  <script src="popup.js"></script>
+</body>
+</html>
