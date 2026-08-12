@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import secrets
+import socket
 import threading
 import time
 import urllib.request
@@ -80,9 +81,27 @@ _server: ThreadingHTTPServer | None = None
 # ---------------------------------------------------------------------------
 
 def get_state() -> dict:
-    """返回当前页面快照的深拷贝（空 dict 表示还没有推送）。"""
+    """返回当前页面快照的深拷贝（空 dict 表示还没有推送）。
+
+    多进程场景（Hermes Studio 桌面版 gateway + bridge 双进程均绑定 4399，
+    推送可能落在任一进程）：内存 state 可能与磁盘不一致 —— 本进程内存为空或
+    磁盘更新时，以磁盘为准（磁盘由收到推送的进程写入，始终是最新）。
+    """
     with _state_lock:
-        return json.loads(json.dumps(_state))
+        mem = json.loads(json.dumps(_state))
+    # 内存有数据且与磁盘一致时直接用内存
+    try:
+        if STATE_FILE.exists():
+            disk = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(disk, dict) and disk:
+                mem_time = mem.get("received_at") or mem.get("fetched_at") or ""
+                disk_time = disk.get("received_at") or disk.get("fetched_at") or ""
+                # 磁盘更新的数据优先（多进程下磁盘是权威）
+                if not mem or (disk_time and disk_time >= mem_time):
+                    return disk
+    except Exception:
+        pass
+    return mem
 
 
 def set_state(page: dict) -> None:
@@ -254,11 +273,24 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def start_server() -> bool:
-    """启动本地 HTTP server（线程内，daemon）。返回是否成功。"""
+    """启动本地 HTTP server（线程内，daemon）。返回是否成功。
+
+    多进程防护：Windows 上多个 Hermes 进程（桌面版 gateway + bridge）都会
+    加载本插件并尝试绑定 4399。若端口已被占用，说明另一个进程已在服务——
+    本进程不再重复绑定，仅保留内存读盘能力（get_state 回退磁盘保证一致性）。
+    """
     global _server
     if _server is not None:
         return True
     try:
+        # 预检端口是否已被占用（Windows 允许 SO_REUSEADDR 重复绑定，需主动检测）
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.settimeout(1)
+        result = probe.connect_ex((HOST, PORT))
+        probe.close()
+        if result == 0:
+            logger.info("browser-bridge: 端口 %d 已被其他进程占用，跳过重复绑定（仅保留读盘模式）", PORT)
+            return True
         server = ThreadingHTTPServer((HOST, PORT), _BridgeHandler)
         server.daemon_threads = True
         _server = server
