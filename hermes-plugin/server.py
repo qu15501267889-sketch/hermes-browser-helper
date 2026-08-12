@@ -192,9 +192,13 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         # 贴吧帖子：自动匿名 API 全量拉取楼层（免滚动）
         if "tieba.baidu.com" in page.get("url", "") and "/p/" in page.get("url", ""):
             try:
-                import importlib
-                tf = importlib.import_module("tieba_fetch")
-            except Exception:
+                import importlib.util
+                _tf_path = Path(__file__).resolve().parent / "tieba_fetch.py"
+                _spec = importlib.util.spec_from_file_location("bb_tieba_fetch", _tf_path)
+                tf = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(tf)
+            except Exception as exc:
+                logger.warning("browser-bridge: 加载 tieba_fetch 失败: %s", exc)
                 tf = None
             tid = tf.extract_tid(page["url"]) if tf else None
             if tid:
