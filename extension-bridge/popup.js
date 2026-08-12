@@ -38,7 +38,7 @@ btn.addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("没有找到当前标签页");
     const url = tab.url || "";
-    if (!/tieba\.baidu\.com|(^|\.)xiaoheihe\.cn/.test(url)) {
+    if (!/tieba\.baidu\.com|xiaoheihe\.cn/.test(url)) {
       throw new Error("当前页面不是贴吧或小黑盒，不抓取。");
     }
     const results = await chrome.scripting.executeScript({
@@ -72,6 +72,111 @@ async function extractPage() {
   const site = /tieba\.baidu\.com/.test(url) ? "tieba" : "xiaoheihe";
   const blocks = [];
   const meta = {};
+
+  async function fetchXiaoheiheAll(baseJson, baseUrl) {
+    // 基于拦截到的第一页 JSON + 完整 URL，翻页拉全所有评论。
+    // 复用页面自己的签名参数（hkey/nonce/_time），只改 page 参数，避免触发风控。
+    const allJson = baseJson;
+    const result = allJson.result || {};
+    const totalPage = result.total_page || 1;
+    const pages = [];
+    pages.push(allJson);
+    for (let p = 2; p <= totalPage; p++) {
+      let u = baseUrl;
+      try {
+        u = u.replace(/([?&])page=\d+/, `$1page=${p}`);
+        const resp = await fetch(u, { credentials: "include", headers: { "Accept": "application/json" } });
+        if (!resp.ok) break;
+        const j = await resp.json();
+        if (!j || j.status !== "ok" || !j.result) break;
+        pages.push(j);
+      } catch (e) {
+        break;
+      }
+    }
+    // 合并所有页的 comments
+    const merged = { status: "ok", result: { ...result, comments: [] } };
+    for (const p of pages) {
+      const r = p.result || {};
+      const grps = r.comments || [];
+      for (const g of grps) {
+        for (const c of g.comment || []) {
+          merged.result.comments.push({ comment: [c] });
+        }
+      }
+    }
+    merged.result.total_page = totalPage;
+    return merged;
+  }
+
+  function parseXiaoheihe(json) {
+    // 小黑盒 link/tree JSON → 帖子 + 评论块
+    const result = json.result || {};
+    const blocks = [];
+    const meta2 = {};
+    const imageUrls = [];
+
+    // 1. 帖子正文
+    const link = result.link || {};
+    let linkText = link.title ? `【${link.title}】\n` : "";
+    let desc = link.description || "";
+    let textRaw = link.text || "";
+    // text 是 JSON 字符串：[{text, type, ...}]，type 含 image（图片）/ text（文字）
+    if (typeof textRaw === "string" && textRaw.startsWith("[")) {
+      try {
+        const arr = JSON.parse(textRaw);
+        const parts = [];
+        const seenTypes = {};
+        for (const x of arr) {
+          const t = x.type ?? x.msg_type ?? "?";
+          seenTypes[`${t}`] = (seenTypes[`${t}`] || 0) + 1;
+          const url = x.origin_url || x.url || x.img_url || x.src || x.image_url || "";
+          if (url) {
+            imageUrls.push(url);
+            parts.push(`[图片](${url})`);
+          } else if (x.text) {
+            parts.push(x.text);
+          } else if (x.c && typeof x.c === "string") {
+            parts.push(x.c);
+          }
+        }
+        meta.xhhTextTypes = seenTypes;
+        textRaw = parts.join("\n");
+      } catch (e) { /* 保持原样 */ }
+    }
+    linkText += (desc + "\n" + textRaw).trim();
+    if (linkText) {
+      const postBlock = {
+        type: "post", floor: 1,
+        author: (link.user && (link.user.username || link.user.name)) || "",
+        time: link.create_at ? new Date(link.create_at * 1000).toISOString() : "",
+        text: linkText.slice(0, 12000),
+      };
+      if (imageUrls.length) {
+        postBlock.images = imageUrls;
+      }
+      blocks.push(postBlock);
+    }
+
+    // 2. 评论（comments[].comment[] 每层）
+    for (const grp of result.comments || []) {
+      for (const c of grp.comment || []) {
+        const u = c.user || {};
+        blocks.push({
+          type: "comment",
+          floor: c.floor_num || 0,
+          author: u.username || u.name || "",
+          time: c.create_at ? new Date(c.create_at * 1000).toISOString() : "",
+          text: (c.text || "").slice(0, 8000),
+        });
+      }
+    }
+
+    meta2.totalFloors = result.total_floor_num || blocks.length;
+    meta2.hasMore = result.has_more_floors || 0;
+    meta2.totalPage = result.total_page || 1;
+    return { blocks, meta2 };
+  }
 
   function parseFloorItems(doc, sel) {
     const items = sel ? doc.querySelectorAll(sel) : doc.querySelectorAll(".pb-comment-item");
@@ -254,11 +359,34 @@ async function extractPage() {
     meta.usedSel = usedSel;
     meta.ssrSample = ssrSample;
   } else {
-    // 小黑盒（M4 再做）：先抓可见 DOM 文本
-    const clone = document.body.cloneNode(true);
-    clone.querySelectorAll("script,style,noscript,iframe,nav,header,footer").forEach((n) => n.remove());
-    const text = (clone.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
-    blocks.push({ type: "text", floor: 0, author: "", text: text.slice(0, 30000) });
+    // 小黑盒：读 hook 拦截的 link/tree 完整响应（页面自带 cookie，能过风控）
+    const bridgeCache = window.__bridgeCache;
+    if (bridgeCache && bridgeCache.xiaoheihe) {
+      const json = bridgeCache.xiaoheihe;
+      meta.xhhStatus = json.status || null;
+      meta.xhhUrl = bridgeCache.xiaoheiheUrl ? bridgeCache.xiaoheiheUrl.slice(0, 400) : null;
+      // 全量分页拉取（复用页面签名参数翻页）
+      let merged = json;
+      if (bridgeCache.xiaoheiheUrl) {
+        try {
+          merged = await fetchXiaoheiheAll(json, bridgeCache.xiaoheiheUrl);
+        } catch (e) {
+          meta.xhhPageError = `${e.message}`;
+        }
+      }
+      const { blocks: xhhBlocks, meta2: xhhMeta } = parseXiaoheihe(merged);
+      meta.xhhBlocks = xhhBlocks.length;
+      meta.xhhHasMore = xhhMeta.hasMore;
+      meta.xhhTotalFloors = xhhMeta.totalFloors;
+      meta.xhhTotalPage = xhhMeta.totalPage;
+      blocks.push(...xhhBlocks);
+    } else {
+      meta.xhhCache = false;
+      const clone = document.body.cloneNode(true);
+      clone.querySelectorAll("script,style,noscript,iframe,nav,header,footer").forEach((n) => n.remove());
+      const text = (clone.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
+      blocks.push({ type: "text", floor: 0, author: "", text: text.slice(0, 30000) });
+    }
   }
 
   return { site, url, title, fetched_at: new Date().toISOString(), content: blocks, meta };

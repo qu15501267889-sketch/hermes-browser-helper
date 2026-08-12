@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "browser-bridge",
-  "version": "3.1.1",
+  "version": "3.2.1",
   "description": "抓取当前贴吧/小黑盒页面完整内容，推送给本地 Hermes（browser-bridge 插件）。",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://tieba.baidu.com/*",
+    "https://xiaoheihe.cn/*",
     "https://*.xiaoheihe.cn/*",
     "http://127.0.0.1:4399/*"
   ],
@@ -18,7 +19,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://tieba.baidu.com/*", "https://*.xiaoheihe.cn/*"],
+      "matches": [
+        "https://tieba.baidu.com/*",
+        "https://xiaoheihe.cn/*",
+        "https://*.xiaoheihe.cn/*"
+      ],
       "js": ["hook.js"],
       "run_at": "document_start",
       "world": "MAIN"

@@ -4,7 +4,7 @@
 
 (() => {
   if (window.__bridgeCache) return; // 防止重复注入
-  const cache = { pagePc: null, lastUrl: location.href };
+  const cache = { pagePc: null, xiaoheihe: null, lastUrl: location.href };
   window.__bridgeCache = cache;
 
   // 拦截 fetch
@@ -12,14 +12,23 @@
   window.fetch = async (...args) => {
     const resp = await origFetch.apply(window, args);
     const url = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
-    if (/\/c\/f\/pb\/page_pc/.test(url) && resp.ok) {
-      try {
-        const clone = resp.clone();
-        const json = await clone.json();
-        cache.pagePc = json;
-        cache.lastUrl = url;
-      } catch (e) {
-        /* 非 JSON 或解析失败，忽略 */
+    if (resp.ok) {
+      if (/\/c\/f\/pb\/page_pc/.test(url)) {
+        try {
+          const clone = resp.clone();
+          const json = await clone.json();
+          cache.pagePc = json;
+          cache.lastUrl = url;
+        } catch (e) { /* 忽略 */ }
+      }
+      if (/\/bbs\/app\/link\/tree/.test(url)) {
+        try {
+          const clone = resp.clone();
+          const json = await clone.json();
+          cache.xiaoheihe = json;
+          cache.xiaoheiheUrl = url;  // 记录完整请求 URL（含分页参数）
+          cache.lastUrl = url;
+        } catch (e) { /* 忽略 */ }
       }
     }
     return resp;
@@ -36,10 +45,16 @@
     this.addEventListener("load", () => {
       try {
         const url = this.__bridgeUrl || "";
-        if (/\/c\/f\/pb\/page_pc/.test(url) && this.status === 200) {
-          const json = JSON.parse(this.responseText);
-          cache.pagePc = json;
-          cache.lastUrl = url;
+        if (this.status === 200) {
+          if (/\/c\/f\/pb\/page_pc/.test(url)) {
+            cache.pagePc = JSON.parse(this.responseText);
+            cache.lastUrl = url;
+          }
+          if (/\/bbs\/app\/link\/tree/.test(url)) {
+            cache.xiaoheihe = JSON.parse(this.responseText);
+            cache.xiaoheiheUrl = url;  // 记录完整请求 URL（含分页参数）
+            cache.lastUrl = url;
+          }
         }
       } catch (e) {
         /* 忽略 */

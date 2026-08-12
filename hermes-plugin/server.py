@@ -15,6 +15,7 @@ import os
 import secrets
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -192,6 +193,58 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                         }
                 except Exception as exc:
                     page.setdefault("fetch_meta", {})["error"] = f"{type(exc).__name__}: {exc}"
+        # 小黑盒：下载 content 里 post 块的 images 到本地（图床带 Referer 可匿名拉）
+        # 【固定规范】每次拉取，帖子正文图片必须一并下载纳入分析（见 README 图片处理章节）
+        elif "xiaoheihe.cn" in page.get("url", "") and "/link/" in page.get("url", ""):
+            try:
+                import importlib
+                import re as _re
+                from pathlib import Path as _Path
+                xhh_dir = _Path(__file__).resolve().parent / "state" / "images" / (
+                    _re.search(r"/link/(\d+)", page.get("url", "")).group(1)
+                    if _re.search(r"/link/(\d+)", page.get("url", "")) else "xhh"
+                )
+                xhh_dir.mkdir(parents=True, exist_ok=True)
+                downloaded = 0
+                for blk in page.get("content") or []:
+                    urls = blk.get("images") or []
+                    if not urls:
+                        continue
+                    local = []
+                    for u in urls:
+                        try:
+                            req = urllib.request.Request(u, headers={
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0",
+                                "Referer": "https://xiaoheihe.cn/",
+                            })
+                            with urllib.request.urlopen(req, timeout=30) as resp:
+                                data = resp.read()
+                            if not data:
+                                continue
+                            ext = "jpg"
+                            ctype = resp.headers.get("Content-Type", "")
+                            if "png" in ctype:
+                                ext = "png"
+                            elif "gif" in ctype:
+                                ext = "gif"
+                            # 用 URL 路径中的唯一片段命名（小黑盒 URL 尾部相同，需取中间哈希段）
+                            path_part = u.split("?")[0]
+                            segs = [s for s in path_part.split("/") if s]
+                            name_base = segs[-1] if segs else "img"
+                            if name_base.endswith((".jpg", ".png", ".gif", ".jpeg")):
+                                name_base = name_base.rsplit(".", 1)[0]
+                            name = f"{_re.sub(r'[^0-9a-zA-Z]', '_', name_base)[:40]}_{downloaded}.{ext}"
+                            path = xhh_dir / name
+                            path.write_bytes(data)
+                            local.append(str(path))
+                            downloaded += 1
+                        except Exception:
+                            continue
+                    if local:
+                        blk["images_local"] = local
+                page.setdefault("fetch_meta", {})["images_downloaded"] = downloaded
+            except Exception as exc:
+                page.setdefault("fetch_meta", {})["img_error"] = f"{type(exc).__name__}: {exc}"
         set_state(page)
         self._send_json(200, {"ok": True, "url": page["url"], "blocks": len(page.get("content") or [])})
 
