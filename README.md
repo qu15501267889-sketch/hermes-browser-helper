@@ -7,7 +7,12 @@
 
 （其他网站不保证可用，详见[已适配站点](#已适配站点当前仅适配以下站点其他网站不保证)）。
 
-**当前版本：V3.3.1**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+**当前版本：V3.3.2**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V3.3.2 变更
+
+- **图片只保留最近 3 个帖子**：每次拉取新帖后自动清理 `state/images/`，只保留当前、上一个、上上个帖子的图片目录（第 4 个出现时删最老的），防止磁盘无限累积
+- 插件描述同步更新
 
 ## V3.3.1 变更（10 个 BUG 修复，全量验收通过）
 

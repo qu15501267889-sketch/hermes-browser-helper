@@ -118,8 +118,30 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+def _cleanup_images(keep: int = 3) -> None:
+    """图片只保留最近 N 个帖子（按目录 mtime 排序），更早的删除。
+
+    规则：永远保留最近 3 个帖子（当前、上一个、上上个），第 4 个出现时删最老的。
+    """
+    try:
+        images_root = STATE_DIR / "images"
+        if not images_root.exists():
+            return
+        dirs = [d for d in images_root.iterdir() if d.is_dir()]
+        if len(dirs) <= keep:
+            return
+        # 按 mtime 从新到旧排序，删除 keep 之后的所有目录
+        dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+        for old in dirs[keep:]:
+            import shutil
+            shutil.rmtree(old, ignore_errors=True)
+            logger.info("browser-bridge: 清理旧帖子图片: %s", old.name)
+    except Exception as exc:
+        logger.warning("browser-bridge: 图片清理失败: %s", exc)
+
+
 def set_state(page: dict) -> None:
-    """存入新快照：内存 + 磁盘持久化（原子写）。"""
+    """存入新快照：内存 + 磁盘持久化（原子写）+ 图片保留最近 3 帖。"""
     page["received_at_epoch"] = time.time()
     with _state_lock:
         _state.clear()
@@ -127,6 +149,7 @@ def set_state(page: dict) -> None:
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(STATE_FILE, page)
+        _cleanup_images(keep=3)
     except Exception as exc:  # 磁盘失败不阻塞接收
         logger.warning("browser-bridge: 状态落盘失败: %s", exc)
 
