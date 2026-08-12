@@ -182,6 +182,10 @@ hermes plugins enable browser-bridge
 - 本地服务仅监听 `127.0.0.1`，数据不出本机
 - 插件只在你浏览的页面运行，捕获内容仅保存在本地
 
+## 开发声明
+
+本项目全程使用 **Hermes Studio Agent + deepseek-v4-flash-0731** 纯许愿式开发（口述需求 → 逐条实现 → 逐个验证），消耗约 **2.5 亿 token** 才达到当前可用状态。😇
+
 ## 许可
 
 MIT License

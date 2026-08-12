@@ -107,6 +107,10 @@ hermes plugins enable browser-bridge
 - 抓取内容只存本地 `state/` 目录（已被 .gitignore 排除）
 - 贴吧抓取匿名调用公开接口，不涉及你的账号
 
+## 开发声明
+
+本项目全程使用 **Hermes Studio Agent + deepseek-v4-flash-0731** 纯许愿式开发（口述需求 → 逐条实现 → 逐个验证），消耗约 **2.5 亿 token** 才达到当前可用状态。😇
+
 ## License
 
 MIT
