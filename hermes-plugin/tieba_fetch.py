@@ -77,8 +77,6 @@ def _post_text(post: dict) -> str:
     return "".join(parts).strip()
 
 
-_IMG_RE = None
-
 def _extract_images(post: dict) -> list:
     """提取楼层里的图片 URL（type=1 或带 cdn_src 的真实图片）。"""
     urls = []
@@ -92,8 +90,11 @@ def _extract_images(post: dict) -> list:
     return urls
 
 
-def _download_image(url: str, save_dir, timeout: int = 30) -> str | None:
-    """下载图片到 save_dir，返回本地路径（失败返回 None）。带 Referer 过图床防盗链。"""
+def _download_image(url: str, save_dir, timeout: int = 30, seq: int = 0) -> str | None:
+    """下载图片到 save_dir，返回本地路径（失败返回 None）。带 Referer 过图床防盗链。
+
+    seq: 序号，拼进文件名避免同 URL 尾部导致的命名碰撞（多图互相覆盖）。
+    """
     try:
         import re as _re
         req = urllib.request.Request(url, headers={
@@ -111,7 +112,7 @@ def _download_image(url: str, save_dir, timeout: int = 30) -> str | None:
         elif "gif" in ctype:
             ext = "gif"
         save_dir.mkdir(parents=True, exist_ok=True)
-        name = f"{_re.sub(r'[^0-9a-zA-Z]', '_', url.split('/')[-1].split('?')[0])[:40]}.{ext}"
+        name = f"{_re.sub(r'[^0-9a-zA-Z]', '_', url.split('/')[-1].split('?')[0])[:40]}_{seq}.{ext}"
         path = save_dir / name
         path.write_bytes(data)
         return str(path)
@@ -199,8 +200,8 @@ def fetch_thread(tid: str, max_pages: int = 100, delay: float = 0.1,
                         parsed["images"] = img_urls
                         if download_images:
                             local = []
-                            for u in img_urls:
-                                path = _download_image(u, images_dir)
+                            for seq_i, u in enumerate(img_urls):
+                                path = _download_image(u, images_dir, seq=seq_i)
                                 if path:
                                     local.append(path)
                                     downloaded += 1

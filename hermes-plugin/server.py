@@ -80,40 +80,53 @@ _server: ThreadingHTTPServer | None = None
 # 状态读写
 # ---------------------------------------------------------------------------
 
+def _ts_epoch(page: dict) -> float:
+    """从快照取时间戳（优先 received_at_epoch，回退解析 received_at）。"""
+    ep = page.get("received_at_epoch")
+    if isinstance(ep, (int, float)):
+        return float(ep)
+    return 0.0
+
+
 def get_state() -> dict:
     """返回当前页面快照的深拷贝（空 dict 表示还没有推送）。
 
     多进程场景（Hermes Studio 桌面版 gateway + bridge 双进程均绑定 4399，
-    推送可能落在任一进程）：内存 state 可能与磁盘不一致 —— 本进程内存为空或
-    磁盘更新时，以磁盘为准（磁盘由收到推送的进程写入，始终是最新）。
+    推送可能落在任一进程）：内存 state 可能与磁盘不一致 —— 以磁盘为准
+    （磁盘由收到推送的进程写入，始终是最新）。比较用 epoch 数值时间戳。
     """
     with _state_lock:
         mem = json.loads(json.dumps(_state))
-    # 内存有数据且与磁盘一致时直接用内存
     try:
         if STATE_FILE.exists():
             disk = json.loads(STATE_FILE.read_text(encoding="utf-8"))
             if isinstance(disk, dict) and disk:
-                mem_time = mem.get("received_at") or mem.get("fetched_at") or ""
-                disk_time = disk.get("received_at") or disk.get("fetched_at") or ""
+                mem_ts = _ts_epoch(mem)
+                disk_ts = _ts_epoch(disk)
                 # 磁盘更新的数据优先（多进程下磁盘是权威）
-                if not mem or (disk_time and disk_time >= mem_time):
+                if not mem or disk_ts >= mem_ts:
                     return disk
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("browser-bridge: get_state 读磁盘失败: %s", exc)
     return mem
 
 
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """原子写 JSON：临时文件 + rename，避免多进程读到半截内容。"""
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
 def set_state(page: dict) -> None:
-    """存入新快照：内存 + 磁盘持久化。"""
+    """存入新快照：内存 + 磁盘持久化（原子写）。"""
+    page["received_at_epoch"] = time.time()
     with _state_lock:
         _state.clear()
         _state.update(page)
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(
-            json.dumps(page, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        _atomic_write_json(STATE_FILE, page)
     except Exception as exc:  # 磁盘失败不阻塞接收
         logger.warning("browser-bridge: 状态落盘失败: %s", exc)
 
@@ -129,6 +142,119 @@ def load_state_from_disk() -> None:
                     _state = data
     except Exception as exc:
         logger.warning("browser-bridge: 恢复状态失败: %s", exc)
+
+
+def refresh_state() -> dict:
+    """重新抓取当前快照（供 page_refresh 工具调用）。
+
+    返回: {ok: bool, url, blocks, fetch_mode} 或 {ok: False, error}
+    """
+    state = get_state()
+    if not state:
+        return {"ok": False, "error": "还没有页面快照可刷新"}
+    page = json.loads(json.dumps(state))
+    page["received_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    try:
+        _fetch_site_content(page)
+        set_state(page)
+        return {
+            "ok": True,
+            "url": page["url"],
+            "blocks": len(page.get("content") or []),
+            "fetch_mode": page.get("fetch_mode"),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# 站点内容拉取（贴吧 API 全量 / 小黑盒图片下载）—— POST /api/page 与
+# GET /api/refresh 共用。修复：多进程下 import 用绝对路径（BUG v3.2.3），
+# 小黑盒图片命名序号去重（BUG-6 同款逻辑）。
+# ---------------------------------------------------------------------------
+
+def _fetch_site_content(page: dict) -> dict:
+    """根据 page['url'] 拉取站点内容，原地更新 page。返回 page。"""
+    url = page.get("url", "")
+    # 贴吧帖子：自动匿名 API 全量拉取楼层（免滚动）
+    if "tieba.baidu.com" in url and "/p/" in url:
+        try:
+            import importlib.util
+            _tf_path = Path(__file__).resolve().parent / "tieba_fetch.py"
+            _spec = importlib.util.spec_from_file_location("bb_tieba_fetch", _tf_path)
+            tf = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(tf)
+        except Exception as exc:
+            logger.warning("browser-bridge: 加载 tieba_fetch 失败: %s", exc)
+            tf = None
+        tid = tf.extract_tid(url) if tf else None
+        if tid:
+            try:
+                result = tf.fetch_thread(tid)
+                if result.get("success"):
+                    page["title"] = result.get("title") or page.get("title", "")
+                    page["content"] = result.get("floors") or []
+                    page["fetch_mode"] = "tieba_api"
+                    page["fetch_meta"] = {
+                        "tid": tid,
+                        "reply_count": result.get("reply_count"),
+                        "total_pages": result.get("total_pages"),
+                        "floors": len(result.get("floors") or []),
+                        "images_downloaded": result.get("images_downloaded", 0),
+                    }
+            except Exception as exc:
+                page.setdefault("fetch_meta", {})["error"] = f"{type(exc).__name__}: {exc}"
+    # 小黑盒：下载 content 里 post 块的 images 到本地（图床带 Referer 可匿名拉）
+    # 【固定规范】每次拉取，帖子正文图片必须一并下载纳入分析（见 README 图片处理章节）
+    elif "xiaoheihe.cn" in url and "/link/" in url:
+        try:
+            import re as _re
+            xhh_dir = Path(__file__).resolve().parent / "state" / "images" / (
+                _re.search(r"/link/(\d+)", url).group(1)
+                if _re.search(r"/link/(\d+)", url) else "xhh"
+            )
+            xhh_dir.mkdir(parents=True, exist_ok=True)
+            downloaded = 0
+            for blk in page.get("content") or []:
+                urls = blk.get("images") or []
+                if not urls:
+                    continue
+                local = []
+                for u in urls:
+                    try:
+                        req = urllib.request.Request(u, headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0",
+                            "Referer": "https://xiaoheihe.cn/",
+                        })
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            data = resp.read()
+                        if not data:
+                            continue
+                        ext = "jpg"
+                        ctype = resp.headers.get("Content-Type", "")
+                        if "png" in ctype:
+                            ext = "png"
+                        elif "gif" in ctype:
+                            ext = "gif"
+                        # 用 URL 路径中的唯一片段命名（小黑盒 URL 尾部相同，需取中间哈希段）
+                        path_part = u.split("?")[0]
+                        segs = [s for s in path_part.split("/") if s]
+                        name_base = segs[-1] if segs else "img"
+                        if name_base.endswith((".jpg", ".png", ".gif", ".jpeg")):
+                            name_base = name_base.rsplit(".", 1)[0]
+                        name = f"{_re.sub(r'[^0-9a-zA-Z]', '_', name_base)[:40]}_{downloaded}.{ext}"
+                        path = xhh_dir / name
+                        path.write_bytes(data)
+                        local.append(str(path))
+                        downloaded += 1
+                    except Exception:
+                        continue
+                if local:
+                    blk["images_local"] = local
+            page.setdefault("fetch_meta", {})["images_downloaded"] = downloaded
+        except Exception as exc:
+            page.setdefault("fetch_meta", {})["img_error"] = f"{type(exc).__name__}: {exc}"
+    return page
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +294,25 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         if self.path == "/health":
             self._send_json(200, {"ok": True, "service": "browser-bridge"})
+        elif self.path == "/api/refresh":
+            # 重新抓取当前快照的 URL（贴吧走 API 全量，小黑盒仅重推）
+            if not self._check_token():
+                self._send_json(403, {"error": "bad token"})
+                return
+            state = get_state()
+            if not state:
+                self._send_json(404, {"error": "no snapshot to refresh"})
+                return
+            page = json.loads(json.dumps(state))
+            page["received_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            _fetch_site_content(page)
+            set_state(page)
+            self._send_json(200, {
+                "ok": True,
+                "url": page["url"],
+                "blocks": len(page.get("content") or []),
+                "fetch_mode": page.get("fetch_mode"),
+            })
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -189,85 +334,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "payload must be a dict with 'url'"})
             return
         page.setdefault("received_at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
-        # 贴吧帖子：自动匿名 API 全量拉取楼层（免滚动）
-        if "tieba.baidu.com" in page.get("url", "") and "/p/" in page.get("url", ""):
-            try:
-                import importlib.util
-                _tf_path = Path(__file__).resolve().parent / "tieba_fetch.py"
-                _spec = importlib.util.spec_from_file_location("bb_tieba_fetch", _tf_path)
-                tf = importlib.util.module_from_spec(_spec)
-                _spec.loader.exec_module(tf)
-            except Exception as exc:
-                logger.warning("browser-bridge: 加载 tieba_fetch 失败: %s", exc)
-                tf = None
-            tid = tf.extract_tid(page["url"]) if tf else None
-            if tid:
-                try:
-                    result = tf.fetch_thread(tid)
-                    if result.get("success"):
-                        page["title"] = result.get("title") or page.get("title", "")
-                        page["content"] = result.get("floors") or []
-                        page["fetch_mode"] = "tieba_api"
-                        page["fetch_meta"] = {
-                            "tid": tid,
-                            "reply_count": result.get("reply_count"),
-                            "total_pages": result.get("total_pages"),
-                            "floors": len(result.get("floors") or []),
-                        }
-                except Exception as exc:
-                    page.setdefault("fetch_meta", {})["error"] = f"{type(exc).__name__}: {exc}"
-        # 小黑盒：下载 content 里 post 块的 images 到本地（图床带 Referer 可匿名拉）
-        # 【固定规范】每次拉取，帖子正文图片必须一并下载纳入分析（见 README 图片处理章节）
-        elif "xiaoheihe.cn" in page.get("url", "") and "/link/" in page.get("url", ""):
-            try:
-                import importlib
-                import re as _re
-                from pathlib import Path as _Path
-                xhh_dir = _Path(__file__).resolve().parent / "state" / "images" / (
-                    _re.search(r"/link/(\d+)", page.get("url", "")).group(1)
-                    if _re.search(r"/link/(\d+)", page.get("url", "")) else "xhh"
-                )
-                xhh_dir.mkdir(parents=True, exist_ok=True)
-                downloaded = 0
-                for blk in page.get("content") or []:
-                    urls = blk.get("images") or []
-                    if not urls:
-                        continue
-                    local = []
-                    for u in urls:
-                        try:
-                            req = urllib.request.Request(u, headers={
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0",
-                                "Referer": "https://xiaoheihe.cn/",
-                            })
-                            with urllib.request.urlopen(req, timeout=30) as resp:
-                                data = resp.read()
-                            if not data:
-                                continue
-                            ext = "jpg"
-                            ctype = resp.headers.get("Content-Type", "")
-                            if "png" in ctype:
-                                ext = "png"
-                            elif "gif" in ctype:
-                                ext = "gif"
-                            # 用 URL 路径中的唯一片段命名（小黑盒 URL 尾部相同，需取中间哈希段）
-                            path_part = u.split("?")[0]
-                            segs = [s for s in path_part.split("/") if s]
-                            name_base = segs[-1] if segs else "img"
-                            if name_base.endswith((".jpg", ".png", ".gif", ".jpeg")):
-                                name_base = name_base.rsplit(".", 1)[0]
-                            name = f"{_re.sub(r'[^0-9a-zA-Z]', '_', name_base)[:40]}_{downloaded}.{ext}"
-                            path = xhh_dir / name
-                            path.write_bytes(data)
-                            local.append(str(path))
-                            downloaded += 1
-                        except Exception:
-                            continue
-                    if local:
-                        blk["images_local"] = local
-                page.setdefault("fetch_meta", {})["images_downloaded"] = downloaded
-            except Exception as exc:
-                page.setdefault("fetch_meta", {})["img_error"] = f"{type(exc).__name__}: {exc}"
+        # 站点内容拉取（贴吧 API 全量 / 小黑盒图片下载）—— 共用函数
+        _fetch_site_content(page)
         set_state(page)
         self._send_json(200, {"ok": True, "url": page["url"], "blocks": len(page.get("content") or [])})
 

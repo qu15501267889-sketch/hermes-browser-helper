@@ -8,7 +8,17 @@
 
 （其他网站不保证可用，详见[已适配站点](#已适配站点当前仅适配以下站点其他网站不保证)）。
 
-**当前版本：V3.2.1**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+**当前版本：V3.3.1**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V3.3.1 变更（10 个 BUG 修复，全量验收通过）
+
+- **修复 page_refresh 工具永远失败**：现在真正触发重新抓取（贴吧匿名 API 重新全量拉取），无需用户手动操作浏览器
+- **修复贴吧 JSON 路径作者名缺失**：user_list 映射（此前 post_list 只有 author_id，作者名全空）
+- **修复多进程状态竞态**：磁盘原子写（tmp+rename）+ epoch 数值时间戳比较，多进程读盘一致性
+- **修复贴吧图片命名碰撞**：多图加序号不再互相覆盖
+- **清理死代码**：background.js 精简、popup.js 删除 3 个死函数（fetchTiebaPage/fetchPagePc/probeSelectors）、删死变量
+- **补 manifest 权限**：host_permissions 与 content_scripts 增加 api.xiaoheihe.cn
+- 重构：server 站点拉取抽为共用函数 `_fetch_site_content`（POST /api/page 与 /api/refresh 共用）
 
 ## V3.2.1 变更
 

@@ -127,11 +127,17 @@ def _handle_page_content(args: dict, **kw) -> str:
 def _handle_page_refresh(args: dict, **kw) -> str:
     """请求重新抓取当前页面。
 
-    当前实现：提示用户手动点击扩展按钮（扩展侧的自动重抓在 M2 之后接入）。
+    贴吧：server 侧匿名 API 重新全量拉取；小黑盒：重新下载图片。
+    无需用户手动操作浏览器（快照里的 URL 就是目标）。
     """
-    return tool_result(
-        success=False,
-        message="自动重抓还未接入。请切换到你的浏览器，点击 browser-bridge 扩展的「拉取」按钮，"
-                "抓取完成后再问我。",
-    )
+    result = server.refresh_state()
+    if result.get("ok"):
+        return tool_result(
+            success=True,
+            message="已重新抓取当前页面",
+            url=result.get("url", ""),
+            blocks=result.get("blocks", 0),
+            fetch_mode=result.get("fetch_mode"),
+        )
+    return tool_result(success=False, message=result.get("error", "刷新失败"))
 

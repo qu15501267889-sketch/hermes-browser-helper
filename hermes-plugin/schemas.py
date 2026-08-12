@@ -29,8 +29,8 @@ PAGE_CONTENT_SCHEMA = {
 PAGE_REFRESH_SCHEMA = {
     "name": "page_refresh",
     "description": (
-        "请求重新抓取当前页面。抓取需要用户在浏览器里点击扩展按钮，"
-        "调用此工具后应提示用户去点。"
+        "重新抓取当前页面快照：贴吧会通过官方 API 重新全量拉取全部楼层，"
+        "小黑盒重新下载图片。无需用户在浏览器里操作，直接调用即可。"
     ),
     "parameters": {"type": "object", "properties": {}},
 }

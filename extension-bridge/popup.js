@@ -192,16 +192,15 @@ async function extractPage() {
     return out;
   }
 
-  async function fetchTiebaPage(tid, pn) {
-    const u = `https://tieba.baidu.com/p/${tid}?pn=${pn}`;
-    const resp = await fetch(u, { credentials: "include", headers: { "X-Requested-With": "XMLHttpRequest" } });
-    if (!resp.ok) throw new Error(`分页请求失败 pn=${pn}: HTTP ${resp.status}`);
-    const html = await resp.text();
-    return new DOMParser().parseFromString(html, "text/html");
-  }
-
   function parsePcJson(json) {
     // 解析 page_pc JSON：first_floor + post_list → 楼层块
+    // 作者名在顶层 user_list（按 author_id 映射），post 里只有 author_id
+    const userMap = {};
+    for (const u of json.user_list || []) {
+      if (u && u.id != null) {
+        userMap[u.id] = u.name || u.name_show || "";
+      }
+    }
     const posts = [];
     if (json.first_floor) posts.push(json.first_floor);
     if (Array.isArray(json.post_list)) posts.push(...json.post_list);
@@ -213,29 +212,15 @@ async function extractPage() {
         text = p.content;
       }
       const ts = p.time ? new Date(p.time * 1000).toISOString() : "";
+      const author = p.author_name || p.name || (p.author_id != null ? (userMap[p.author_id] || "") : "");
       return {
         type: "floor",
         floor: p.floor || 0,
-        author: p.author_name || p.name || "",
+        author,
         time: ts,
         text: (text || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000),
       };
     });
-  }
-
-  async function fetchPagePc(pagePcUrl) {
-    // 重放页面自己请求过的 page_pc 接口（含正确 sign + cookie）
-    const resp = await fetch(pagePcUrl, { credentials: "include" });
-    if (!resp.ok) throw new Error(`page_pc 请求失败: HTTP ${resp.status}`);
-    return resp.json();
-  }
-
-  function probeSelectors(doc, sels) {
-    const counts = {};
-    for (const s of sels) {
-      try { counts[s] = doc.querySelectorAll(s).length; } catch (e) { counts[s] = -1; }
-    }
-    return counts;
   }
 
   function probeNetworkApis() {
@@ -312,52 +297,11 @@ async function extractPage() {
     }
 
     // 循环抓后续页：直到某页没有新楼层
-    let pn = 2;
-    let emptyStreak = 0;
-    let usedSel = null;
-    let ssrSample = "";
-    while (emptyStreak < 2 && pn <= 50) {
-      let doc;
-      try {
-        doc = await fetchTiebaPage(tid, pn);
-      } catch (e) {
-        meta.paginationError = `${e.message}`;
-        break;
-      }
-      if (pn === 2) {
-        // 记录 SSR 页面的结构样本 + 各选择器命中数（用于调试/适配）
-        ssrSample = (doc.body?.innerText || "").replace(/\s+/g, " ").slice(0, 200);
-        meta.ssrProbe = probeSelectors(doc, [
-          ".pb-comment-item", ".pb-comment-list", ".thread-container", ".post-item",
-          ".l_post", ".d_post_content", "[data-field]", ".pb-reply-item",
-        ]);
-      }
-      // 用探测到的选择器提取楼层
-      let floors = [];
-      const probe = detectFloorItems(doc);
-      if (probe.sel && !usedSel) usedSel = probe.sel;
-      if (probe.sel) {
-        floors = [...probe.els].map((el) => {
-          const author = el.querySelector(".head-name")?.innerText?.trim() || "";
-          let text = (el.innerText || "").trim();
-          const head = el.querySelector(".head-line");
-          if (head) text = text.replace((head.innerText || "").trim(), "").trim();
-          text = text.replace(/\n{3,}/g, "\n\n").trim();
-          return { type: "floor", floor: 0, author, text: text.slice(0, 8000) };
-        });
-      }
-      if (!floors.length) {
-        emptyStreak += 1;
-      } else {
-        emptyStreak = 0;
-        blocks.push(...floors);
-      }
-      pn += 1;
-    }
-    meta.pagesFetched = pn - 1;
+    // 【BUG-8 修复】原实现 fetch ?pn=N 旧版 HTML 已被百度验证码拦截（必然失败），
+    // 且贴吧全量楼层现由 server 端 API 负责（tieba_fetch.py），扩展只需传 URL。
+    // 删除死循环，保留 JSON 路径作为扩展侧增强。
+    meta.pagesFetched = 1;
     meta.totalBlocks = blocks.length;
-    meta.usedSel = usedSel;
-    meta.ssrSample = ssrSample;
   } else {
     // 小黑盒：读 hook 拦截的 link/tree 完整响应（页面自带 cookie，能过风控）
     const bridgeCache = window.__bridgeCache;
