@@ -6,7 +6,7 @@ hermes链接浏览器助手 - 一键部署脚本（agent 可直接执行）
 做什么：
   1. 检测环境（Python、Edge/Chrome）
   2. 启动本地服务（server/ensure-server-running.py）
-  3. 验证服务就绪（127.0.0.1:8765）
+  3. 验证服务就绪（127.0.0.1:4399）
   4. 用 --load-extension 启动浏览器并加载扩展
   5. 提示手动确认（首次需开开发者模式）
 
@@ -28,7 +28,7 @@ import sys
 import time
 import urllib.request
 
-SERVER_PORT = 8765
+SERVER_PORT = 4399
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTENSION_DIR = os.path.join(BASE_DIR, "extension")
 SERVER_SCRIPT = os.path.join(BASE_DIR, "server", "ensure-server-running.py")

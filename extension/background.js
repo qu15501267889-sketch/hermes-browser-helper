@@ -1,12 +1,14 @@
 // background.js — 通用网页抓取引擎后台
 // 监听页面变化，调用 content script 捕获数据，发送到本地服务
 
-const LOCAL_SERVER = 'http://127.0.0.1:8765';
+// V3.3.3: 默认端口同步为新架构（hermes-plugin 的 4399），旧 8765 服务已不再维护
+const LOCAL_SERVER = 'http://127.0.0.1:4399';
 
 // 默认配置（可从 storage 覆盖）
 const DEFAULT_CONFIG = {
   autoCapture: false,       // V2.1: 默认手动模式（只有用户点 popup 按钮才捕获）；打开开关可恢复自动
   serverUrl: LOCAL_SERVER,
+  bridgeToken: '',          // V3.3.3: 新 server 的 token（从 hermes-plugin/config.json 复制，或与 extension-bridge 共用）
   captureDelay: 4000,      // 延迟 4 秒等 JS 渲染
   deepCapture: true,
 };
@@ -31,10 +33,14 @@ async function sendToServer(data) {
   try {
     const resp = await fetch(`${config.serverUrl}/api/page`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.bridgeToken ? { 'X-Bridge-Token': config.bridgeToken } : {}),
+      },
       body: JSON.stringify(data),
     });
     if (resp.ok) console.log('[Hermes] 已发送:', data.title?.slice(0, 40));
+    else console.log('[Hermes] 发送失败:', resp.status, (await resp.text()).slice(0, 100));
   } catch (e) {
     // 服务未启动是正常情况
   }

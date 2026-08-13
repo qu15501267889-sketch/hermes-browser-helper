@@ -7,7 +7,13 @@
 
 （其他网站不保证可用，详见[已适配站点](#已适配站点当前仅适配以下站点其他网站不保证)）。
 
-**当前版本：V3.3.2**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+**当前版本：V3.3.3**（[Release 下载](https://github.com/qu15501267889-sketch/hermes-browser-helper/releases)）
+
+## V3.3.3 变更
+
+- **旧扩展端口同步**：`extension/`（旧扩展）默认端口从 8765 改为 **4399**，可直接联通新架构（hermes-plugin），并支持从 storage 配置 token（`X-Bridge-Token`）
+- **千川声明**：`extension/`（旧扩展）支持巨量千川；`extension-bridge/`（新扩展）与 `hermes-plugin/`（Hermes 插件）**不支持千川**
+- install.py 引导脚本同步为 4399
 
 ## V3.3.2 变更
 
@@ -65,7 +71,7 @@
 路径 A（原有）：浏览器扩展 + 本地服务
 ┌─────────────┐  捕获   ┌──────────────┐  HTTP   ┌──────────────┐   读取   ┌─────────┐
 │  浏览器插件  │ ──────▶ │  本地服务     │ ──────▶ │  localhost   │ ───────▶ │ Hermes  │
-│  extension/ │ 页面DOM │  server/     │  8765   │ :8765/api/   │          │  AI     │
+│  extension/ │ 页面DOM │  server/     │  4399   │ :4399/api/   │          │  AI     │
 └──────┬──────┘  +API拦截 └──────────────┘         └──────────────┘          └─────────┘
        │
        │  fetch/XHR 拦截（通用）：任何网站的 API 响应都能捕获
@@ -115,7 +121,7 @@ python install.py --browser edge
 python install.py --no-browser   # 只启动服务
 ```
 
-`install.py` 会输出明确的部署步骤，agent 可自主完成：环境检测 → 启动服务 → 验证 `127.0.0.1:8765` → 加载扩展。
+`install.py` 会输出明确的部署步骤，agent 可自主完成：环境检测 → 启动服务 → 验证 `127.0.0.1:4399` → 加载扩展。
 
 ### 卸载
 
@@ -172,8 +178,10 @@ hermes plugins enable browser-bridge
 连接配置（host/port/token）在 `hermes-plugin/config.json`（token 自动生成），或扩展 popup「⚙️ 连接设置」里填写。
 
 > 说明：`extension/`（原有）与 `extension-bridge/`（V3.1.1 新增）是两套独立扩展：
-> - `extension/` → 配合 `server/`（8765）使用，多站点、自动捕获、深度捕获
-> - `extension-bridge/` → 配合 `hermes-plugin/`（4399）使用，仅传递 URL，贴吧全量由插件 API 直拉
+> - `extension/`（旧）→ **V3.3.3 起端口已同步为 4399**，可直接联通新架构（hermes-plugin）；支持**巨量千川**（statQuery 等数据接口）等更多站点、自动捕获、深度捕获
+> - `extension-bridge/`（新）→ 配合 `hermes-plugin/`（4399）使用，仅传递 URL，贴吧/小黑盒全量由插件 API 直拉；**不支持千川**
+>
+> **千川声明**：`extension/`（旧扩展）支持巨量千川，`extension-bridge/`（新扩展）与 `hermes-plugin/`（Hermes 插件）**均不支持千川**。
 
 ## 通用性设计
 
